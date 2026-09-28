@@ -1,4 +1,5 @@
 import express from 'express';
+import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -6,13 +7,16 @@ import { promisify } from 'node:util';
 import { access } from 'node:fs/promises';
 import { ApiError, configExists, createConfigFile, createConfigFileFromData, deleteEntity, mergeConfigYaml, mergeSelectedEntities, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, upsertRawEntity, type EntityKind } from './kubeconfig.js';
 
-const app = express();
-const port = Number(process.env.PORT ?? 4174);
 const configPath = join(homedir(), '.kube', 'config');
-let defaultConfigPath = '';
-const registeredPaths = new Set<string>();
-const entityKinds = new Set<EntityKind>(['clusters', 'users', 'contexts']);
 const runFileDialog = promisify(execFile);
+
+type FileDialog = (mode: 'open' | 'save') => Promise<string | null>;
+
+export interface ServerOptions {
+  port?: number;
+  assetsDirectory?: string;
+  fileDialog?: FileDialog;
+}
 
 async function nativeFileDialog(mode: 'open' | 'save'): Promise<string | null> {
   if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
@@ -42,16 +46,21 @@ async function nativeFileDialog(mode: 'open' | 'save'): Promise<string | null> {
   throw new ApiError(501, 'No supported desktop file chooser is installed. Enter the config path manually.');
 }
 
-async function selectedPath(value: unknown): Promise<string> {
-  const path = await normalizeConfigPath(value);
-  if (!registeredPaths.has(path)) throw new ApiError(403, 'Add this config file before managing it.');
-  return path;
-}
+function createApp(defaultConfigPath: string, assetsDirectory: string, fileDialog: FileDialog) {
+  const app = express();
+  const registeredPaths = new Set([defaultConfigPath]);
+  const entityKinds = new Set<EntityKind>(['clusters', 'users', 'contexts']);
 
-async function configPayload(path: string) {
-  const config = await readConfig(path);
-  return { ...sanitizeConfig(config), configPath: path, exists: await configExists(path), isDefault: path === defaultConfigPath };
-}
+  async function selectedPath(value: unknown): Promise<string> {
+    const path = await normalizeConfigPath(value);
+    if (!registeredPaths.has(path)) throw new ApiError(403, 'Add this config file before managing it.');
+    return path;
+  }
+
+  async function configPayload(path: string) {
+    const config = await readConfig(path);
+    return { ...sanitizeConfig(config), configPath: path, exists: await configExists(path), isDefault: path === defaultConfigPath };
+  }
 
 app.disable('x-powered-by');
 app.use((request, response, next) => {
@@ -103,7 +112,7 @@ app.post('/api/files', async (request, response, next) => {
 app.post('/api/files/browse', async (request, response, next) => {
   try {
     const mode = request.body.mode === 'save' ? 'save' : 'open';
-    const selected = await nativeFileDialog(mode);
+    const selected = await fileDialog(mode);
     if (!selected) {
       response.json({ cancelled: true });
       return;
@@ -225,7 +234,7 @@ app.put('/api/current-context', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
-app.use(express.static(resolve(process.cwd(), 'dist')));
+app.use(express.static(assetsDirectory));
 
 app.use((error: any, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   const status = error instanceof ApiError ? error.status : 500;
@@ -233,10 +242,37 @@ app.use((error: any, _request: express.Request, response: express.Response, _nex
   response.status(status).json({ error: status === 500 ? 'Kubeconfig operation failed.' : error.message });
 });
 
-void normalizeConfigPath(configPath).then((defaultPath) => {
-  defaultConfigPath = defaultPath;
-  registeredPaths.add(defaultConfigPath);
-  app.listen(port, '127.0.0.1', () => {
-  console.log(`Kubeconfig Manager API listening on http://127.0.0.1:${port}`);
+  return app;
+}
+
+export async function startServer(options: ServerOptions = {}) {
+  const defaultConfigPath = await normalizeConfigPath(configPath);
+  const app = createApp(
+    defaultConfigPath,
+    options.assetsDirectory ?? resolve(process.cwd(), 'dist'),
+    options.fileDialog ?? nativeFileDialog,
+  );
+  const server = createServer(app);
+
+  await new Promise<void>((resolveListen, reject) => {
+    const onError = (error: Error) => reject(error);
+    server.once('error', onError);
+    server.listen(options.port ?? Number(process.env.PORT ?? 4174), '127.0.0.1', () => {
+      server.off('error', onError);
+      resolveListen();
+    });
   });
-});
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    throw new Error('The local API server did not provide a network address.');
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolveClose, reject) => {
+      server.close((error) => error ? reject(error) : resolveClose());
+    }),
+  };
+}

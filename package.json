@@ -1,13 +1,20 @@
 {
   "name": "kubeconfig-manager",
   "version": "0.1.0",
+  "description": "A local desktop manager for Kubernetes kubeconfig files.",
   "private": true,
   "type": "module",
+  "desktopName": "kubeconfig-manager",
+  "main": "desktop-dist/desktop/main.js",
   "scripts": {
-    "dev": "concurrently -k \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
-    "build": "tsc --noEmit && vite build",
-    "start": "tsx server/index.ts",
-    "test": "vitest run"
+    "dev": "concurrently -k \"tsx watch server/cli.ts\" \"vite --host 127.0.0.1\"",
+    "build": "tsc --noEmit && vite build && npm run build:desktop",
+    "build:desktop": "tsc -p tsconfig.desktop.json",
+    "start": "tsx server/cli.ts",
+    "test": "vitest run",
+    "desktop:dev": "npm run build && electron .",
+    "package:linux": "bash scripts/build-appimage.sh",
+    "release:check": "node scripts/check-release-version.mjs"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.3.0",
@@ -25,9 +32,28 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.kubeconfigmanager.desktop",
+    "productName": "Kubeconfig Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop-dist/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility",
+      "syncDesktopName": true
+    }
   }
 }

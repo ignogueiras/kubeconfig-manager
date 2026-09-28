@@ -13,6 +13,30 @@ npm run dev
 
 Open the Vite URL printed in the terminal (normally `http://127.0.0.1:5173`). The interface and API bind to localhost. To run a production build, use `npm run build` and then `npm start`; the server serves the built interface on `http://127.0.0.1:4174`.
 
+## Linux desktop app
+
+Build an AppImage on Linux with:
+
+```sh
+npm install
+npm run package:linux
+```
+
+The executable is written to `release/`. The build script removes generated intermediate files after packaging, including if the build fails, and leaves the AppImage in place. It bundles Electron and the application, so end users do not need Node.js installed. Launch the AppImage from any working directory. The desktop app uses the operating system's native file chooser; it does not require `zenity` or `kdialog`. AppImage runtime support, including FUSE on distributions that require it, must be available on the target system.
+
+This first package target is Linux x64 AppImage. Debian packages and other distributions are not produced yet. Build and test release artifacts on Linux; local browser development still requires Node.js 20 or newer.
+
+## Creating a release
+
+Use npm's version command to update `package.json` and `package-lock.json` together and create a matching `v` tag:
+
+```sh
+npm version patch
+git push --follow-tags
+```
+
+Use `npm version minor`, `npm version major`, or an explicit version such as `npm version 1.2.3` when appropriate. Pushing the tag starts the GitHub Actions release workflow. It checks that the tag exactly matches the app version, runs the tests, builds the AppImage, and attaches it to a GitHub Release. A mismatch fails before packaging. You can check a tag locally with `npm run release:check -- v0.1.0`.
+
 ## Features
 
 - Browse and search contexts, clusters, and users.

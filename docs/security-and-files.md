@@ -24,4 +24,4 @@ The manager does not delete backups, inspect cluster reachability, run `kubectl`
 
 ## Native file chooser
 
-On Linux, the server uses `zenity` or `kdialog` when available to open the desktop file chooser. If neither command is installed, enter a path manually in the dialog. The chooser returns a path to the server; file contents are read and written by the local server rather than uploaded through the browser.
+The packaged Electron app opens the operating system's native file chooser and passes only the selected path to its localhost server. In browser-based development or production-server mode, Linux uses `zenity` or `kdialog` when available; if neither is installed, enter a path manually. In both modes, file contents are read and written by the local server rather than uploaded through the browser.
