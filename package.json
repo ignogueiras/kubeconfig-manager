@@ -13,7 +13,7 @@
     "start": "tsx server/cli.ts",
     "test": "vitest run",
     "desktop:dev": "npm run build && electron .",
-    "package:linux": "npm run build && electron-builder --linux AppImage"
+    "package:linux": "bash scripts/build-appimage.sh"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.3.0",

@@ -22,7 +22,7 @@ npm install
 npm run package:linux
 ```
 
-The executable is written to `release/`. It bundles Electron and the application, so end users do not need Node.js installed. Launch the AppImage from any working directory. The desktop app uses the operating system's native file chooser; it does not require `zenity` or `kdialog`. AppImage runtime support, including FUSE on distributions that require it, must be available on the target system.
+The executable is written to `release/`. The build script removes generated intermediate files after packaging, including if the build fails, and leaves the AppImage in place. It bundles Electron and the application, so end users do not need Node.js installed. Launch the AppImage from any working directory. The desktop app uses the operating system's native file chooser; it does not require `zenity` or `kdialog`. AppImage runtime support, including FUSE on distributions that require it, must be available on the target system.
 
 This first package target is Linux x64 AppImage. Debian packages and other distributions are not produced yet. Build and test release artifacts on Linux; local browser development still requires Node.js 20 or newer.
 
