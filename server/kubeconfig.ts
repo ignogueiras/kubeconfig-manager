@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { stringify, parseDocument } from 'yaml';
 import { isDeepStrictEqual } from 'node:util';
+import { X509Certificate } from 'node:crypto';
 
 export type EntityKind = 'clusters' | 'users' | 'contexts';
 export type KubeConfig = Record<string, any>;
@@ -195,6 +196,10 @@ export function sanitizeConfig(config: KubeConfig) {
     tlsServerName: cluster['tls-server-name'] ?? '',
     insecureSkipTlsVerify: Boolean(cluster['insecure-skip-tls-verify']),
     certificateAuthorityPresent: Boolean(cluster['certificate-authority'] || cluster['certificate-authority-data']),
+    certificateAuthorityFilePresent: Boolean(cluster['certificate-authority']),
+    certificateAuthorityDataPresent: Boolean(cluster['certificate-authority-data']),
+    proxyUrlConfigured: Boolean(cluster['proxy-url']),
+    disableCompression: Boolean(cluster['disable-compression']),
   }));
   const users = (config.users ?? []).map(({ name, user = {} }: any) => ({
     name,
@@ -218,6 +223,27 @@ function getAuthType(user: Record<string, any>): string {
   if (user['auth-provider']) return 'auth-provider';
   if (user.username || user.password) return 'basic';
   return 'none';
+}
+
+function normalizeCertificateAuthorityData(input: unknown): string {
+  const value = String(input ?? '').trim();
+  if (!value) throw new ApiError(400, 'Paste a PEM certificate or base64-encoded certificate data.');
+  const pemPattern = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+  const certificates = value.match(pemPattern);
+  if (certificates?.length) {
+    if (value.replace(pemPattern, '').trim()) throw new ApiError(400, 'Certificate data must contain only PEM certificates.');
+    try { certificates.forEach((certificate) => new X509Certificate(certificate)); }
+    catch { throw new ApiError(400, 'Certificate data contains an invalid PEM certificate.'); }
+    return Buffer.from(value, 'utf8').toString('base64');
+  }
+  const compact = value.replace(/\s+/g, '');
+  const decoded = Buffer.from(compact, 'base64');
+  if (!decoded.length || decoded.toString('base64').replace(/=+$/, '') !== compact.replace(/=+$/, '')) {
+    throw new ApiError(400, 'Certificate data must be PEM or valid base64.');
+  }
+  try { new X509Certificate(decoded); }
+  catch { throw new ApiError(400, 'Certificate data contains an invalid certificate.'); }
+  return compact;
 }
 
 export function upsertEntity(config: KubeConfig, kind: EntityKind, name: string, input: Record<string, any>) {
@@ -259,10 +285,35 @@ function makeEntity(kind: EntityKind, name: string, input: Record<string, any>, 
     else delete cluster['tls-server-name'];
     if (input.insecureSkipTlsVerify) cluster['insecure-skip-tls-verify'] = true;
     else delete cluster['insecure-skip-tls-verify'];
-    if (input.certificateAuthority) {
+    const certificateAuthorityMode = String(input.certificateAuthorityMode ?? 'preserve');
+    if (certificateAuthorityMode === 'none') {
+      delete cluster['certificate-authority'];
+      delete cluster['certificate-authority-data'];
+    } else if (certificateAuthorityMode === 'file') {
+      const certificateAuthority = String(input.certificateAuthority ?? '').trim();
+      if (certificateAuthority) {
+        cluster['certificate-authority'] = certificateAuthority;
+        delete cluster['certificate-authority-data'];
+      } else if (!cluster['certificate-authority']) {
+        throw new ApiError(400, 'Enter the certificate authority file path.');
+      }
+    } else if (certificateAuthorityMode === 'data') {
+      const certificateAuthorityData = String(input.certificateAuthorityData ?? '').trim();
+      if (certificateAuthorityData) {
+        cluster['certificate-authority-data'] = normalizeCertificateAuthorityData(certificateAuthorityData);
+        delete cluster['certificate-authority'];
+      } else if (!cluster['certificate-authority-data']) {
+        throw new ApiError(400, 'Paste certificate authority data.');
+      }
+    } else if (input.certificateAuthority) {
       cluster['certificate-authority'] = String(input.certificateAuthority).trim();
       delete cluster['certificate-authority-data'];
     }
+    const proxyUrl = String(input.proxyUrl ?? '').trim();
+    if (proxyUrl) cluster['proxy-url'] = proxyUrl;
+    else if (input.clearProxyUrl) delete cluster['proxy-url'];
+    if (input.disableCompression) cluster['disable-compression'] = true;
+    else delete cluster['disable-compression'];
     return { name, cluster };
   }
 

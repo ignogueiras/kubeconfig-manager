@@ -53,6 +53,48 @@ describe('kubeconfig entity operations', () => {
     expect(config.users[0].user.exec).toMatchObject({ command: 'cluster-auth', args: ['--token', 'exec-secret'] });
   });
 
+  it('supports cluster CA files, proxy URLs, and compression settings without exposing paths or credentials', () => {
+    const config = fixture();
+    upsertEntity(config, 'clusters', 'prod', {
+      originalName: 'prod',
+      server: 'https://prod.example.test',
+      certificateAuthorityMode: 'file',
+      certificateAuthority: '/private/ca.pem',
+      proxyUrl: 'https://proxy-user:proxy-password@proxy.example.test',
+      disableCompression: true,
+    });
+    expect(config.clusters[0].cluster).toMatchObject({
+      'certificate-authority': '/private/ca.pem',
+      'proxy-url': 'https://proxy-user:proxy-password@proxy.example.test',
+      'disable-compression': true,
+    });
+    const summary = JSON.stringify(sanitizeConfig(config));
+    expect(summary).not.toContain('/private/ca.pem');
+    expect(summary).not.toContain('proxy-password');
+    expect(JSON.parse(summary).clusters[0]).toMatchObject({ certificateAuthorityFilePresent: true, proxyUrlConfigured: true, disableCompression: true });
+
+    upsertEntity(config, 'clusters', 'prod', {
+      originalName: 'prod',
+      server: 'https://prod.example.test',
+      certificateAuthorityMode: 'none',
+      clearProxyUrl: true,
+      disableCompression: false,
+    });
+    expect(config.clusters[0].cluster).not.toHaveProperty('certificate-authority');
+    expect(config.clusters[0].cluster).not.toHaveProperty('proxy-url');
+    expect(config.clusters[0].cluster).not.toHaveProperty('disable-compression');
+  });
+
+  it('rejects invalid inline cluster certificate data without echoing it', () => {
+    const config = fixture();
+    expect(() => upsertEntity(config, 'clusters', 'prod', {
+      originalName: 'prod',
+      server: 'https://prod.example.test',
+      certificateAuthorityMode: 'data',
+      certificateAuthorityData: 'not-a-certificate-secret',
+    })).toThrow(/Certificate data/);
+  });
+
   it('renames an entity and updates dependent references', () => {
     const config = fixture();
     upsertEntity(config, 'clusters', 'production', { originalName: 'prod', server: 'https://prod.example.test', updateReferences: true });

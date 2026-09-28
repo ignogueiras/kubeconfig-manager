@@ -40,9 +40,9 @@ Removing a non-default file from the sidebar only removes it from the manager. I
 
 Use the **Contexts**, **Clusters**, and **Users** sections in the main navigation to browse and search the selected file. Counts and the current-context summary also refer only to that selected file.
 
-- **Clusters** describe an API server and TLS settings. Add or edit a cluster with an HTTP or HTTPS server URL. The TLS verification toggle should only be disabled for a trusted network.
-- **Users** represent authentication identities. The editor supports bearer tokens, exec plugins, client certificate paths, and basic username/password credentials. Secret inputs are write-only: stored values are not loaded into the form. Leave a credential field blank while editing to preserve its existing value where supported.
-- **Contexts** connect one cluster and one user, with an optional namespace. Both references must already exist in the selected kubeconfig.
+- **Clusters** describe an API server, TLS, and transport settings. The editor covers the server URL, TLS server name, TLS verification, certificate authority from the system trust store, a CA file path, or pasted PEM/base64 CA data, an optional proxy URL, and disabled response compression. CA data, CA file paths, and proxy URLs are not returned to the interface; the raw editor can paste or preserve the complete cluster mapping, including extensions and future fields. The TLS verification toggle should only be disabled for a trusted network.
+- **Users** represent authentication identities. The editor supports bearer tokens, exec plugins, client certificate paths, and basic username/password credentials. Secret inputs are write-only: stored values are not loaded into the form. Leave a credential field blank while editing to preserve its existing value where supported. Raw YAML covers auth-provider data, exec environment, extensions, and other Kubernetes user fields.
+- **Contexts** connect one cluster and one user, with an optional namespace. Both references must already exist in the selected kubeconfig. Raw YAML supports context extensions and additional fields.
 
 Choose **Use context** to update `current-context` in the selected file. Cluster and user entries cannot be deleted while contexts still reference them. Removing the active context clears that file's `current-context` value. Entity changes are validated and saved to the selected file only.
 
