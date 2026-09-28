@@ -55,9 +55,34 @@ describe('kubeconfig entity operations', () => {
 
   it('renames an entity and updates dependent references', () => {
     const config = fixture();
-    upsertEntity(config, 'clusters', 'production', { originalName: 'prod', server: 'https://prod.example.test' });
+    upsertEntity(config, 'clusters', 'production', { originalName: 'prod', server: 'https://prod.example.test', updateReferences: true });
     expect(config.contexts[0].context.cluster).toBe('production');
     expect(() => deleteEntity(config, 'clusters', 'production')).toThrow(/Used by context/);
+  });
+
+  it('rejects referenced renames when automatic context updates are declined', () => {
+    const config = fixture();
+    config.contexts.push({ name: 'prod-readonly', context: { cluster: 'prod', user: 'operator' } });
+    expect(() => upsertEntity(config, 'clusters', 'production', {
+      originalName: 'prod',
+      server: 'https://prod.example.test',
+      updateReferences: false,
+    })).toThrow(/prod-admin, prod-readonly/);
+    expect(config.clusters[0].name).toBe('prod');
+    expect(config.contexts.every((context: any) => context.context.cluster === 'prod')).toBe(true);
+  });
+
+  it('updates only contexts that reference a renamed user', () => {
+    const config = fixture();
+    config.contexts.push({ name: 'staging-admin', context: { cluster: 'prod', user: 'other-user' } });
+    upsertEntity(config, 'users', 'operator-v2', {
+      originalName: 'operator',
+      authType: 'token',
+      token: '',
+      updateReferences: true,
+    });
+    expect(config.contexts[0].context.user).toBe('operator-v2');
+    expect(config.contexts[1].context.user).toBe('other-user');
   });
 
   it('preserves an existing token when an edit leaves the write-only field blank', () => {

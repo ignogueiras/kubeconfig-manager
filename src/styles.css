@@ -175,6 +175,13 @@ tbody tr.active-row { background: #f7faf7; }
 .field-label { display: grid; gap: 6px; color: #68756d; font-size: 10px; font-weight: 700; }
 .field-label input, .field-label select { width: 100%; min-height: 35px; padding: 0 10px; border: 1px solid #dfe6e0; border-radius: 4px; color: #2d3932; background: #fff; font-size: 11px; font-weight: 500; }
 .field-label input::placeholder { color: #adb6b0; }
+.reference-update { display: grid; gap: 11px; padding: 11px; border: 1px solid #dfe8df; border-left: 3px solid #73a280; border-radius: 4px; background: #f7faf7; }
+.reference-update > div { display: grid; gap: 4px; }
+.reference-update strong { color: #45634e; font-size: 10px; }
+.reference-update > div span { color: #7d8a80; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.reference-update > label { display: flex; align-items: flex-start; gap: 8px; color: #53665a; font-size: 9px; font-weight: 600; line-height: 1.5; cursor: pointer; }
+.reference-update > small { color: #99633b; font-size: 9px; line-height: 1.5; }
+.reference-update input { width: 15px; height: 15px; flex: 0 0 15px; margin: 0; accent-color: #347551; }
 .path-entry { display: flex; align-items: stretch; gap: 7px; }
 .path-entry input { min-width: 0; flex: 1; }
 .browse-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }

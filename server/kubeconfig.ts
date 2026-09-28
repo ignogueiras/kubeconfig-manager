@@ -100,9 +100,13 @@ export function upsertEntity(config: KubeConfig, kind: EntityKind, name: string,
 
   if (previousName && previousName !== name) {
     if (kind === 'clusters' || kind === 'users') {
-      for (const item of config.contexts ?? []) {
-        const refKey = kind === 'clusters' ? 'cluster' : 'user';
-        if (item.context?.[refKey] === previousName) item.context[refKey] = name;
+      const refKey = kind === 'clusters' ? 'cluster' : 'user';
+      const affectedContexts = (config.contexts ?? []).filter((item: any) => item.context?.[refKey] === previousName);
+      if (affectedContexts.length && input.updateReferences !== true) {
+        throw new ApiError(409, `Rename affects contexts: ${affectedContexts.map((item: any) => item.name).join(', ')}. Enable reference updates or keep the current name.`);
+      }
+      if (input.updateReferences === true) {
+        for (const item of affectedContexts) item.context[refKey] = name;
       }
     } else if (config['current-context'] === previousName) {
       config['current-context'] = name;
