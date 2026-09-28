@@ -39,3 +39,8 @@ Each file is managed separately. Removing a file from the manager unregisters it
 npm test
 npm run build
 ```
+
+## Documentation
+
+- [Usage guide](docs/usage.md): file selection, entity management, context switching, and using the selected config with `kubectl`.
+- [Files and security](docs/security-and-files.md): file boundaries, credentials, validation, backups, and native file chooser behavior.
