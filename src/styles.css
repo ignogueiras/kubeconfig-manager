@@ -173,8 +173,13 @@ tbody tr.active-row { background: #f7faf7; }
 .dialog-header .icon-button { margin-left: auto; }
 .dialog-form { padding: 16px 19px 18px; display: grid; gap: 13px; }
 .field-label { display: grid; gap: 6px; color: #68756d; font-size: 10px; font-weight: 700; }
-.field-label input, .field-label select { width: 100%; min-height: 35px; padding: 0 10px; border: 1px solid #dfe6e0; border-radius: 4px; color: #2d3932; background: #fff; font-size: 11px; font-weight: 500; }
+.field-label input, .field-label select, .field-label textarea { width: 100%; min-height: 35px; padding: 0 10px; border: 1px solid #dfe6e0; border-radius: 4px; color: #2d3932; background: #fff; font-size: 11px; font-weight: 500; }
 .field-label input::placeholder { color: #adb6b0; }
+.field-label textarea { resize: vertical; padding: 9px 10px; line-height: 1.5; }
+.entity-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 4px; border-radius: 5px; background: #f1f4f1; }
+.entity-mode-tabs button { min-height: 31px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #7b8780; font-size: 10px; font-weight: 600; cursor: pointer; }
+.entity-mode-tabs button.active { border-color: #e3e9e3; background: #fff; color: #356b4c; box-shadow: 0 1px 2px rgba(33,55,41,.05); }
+.yaml-editor { min-height: 210px !important; resize: vertical; font: 10px/1.6 var(--mono) !important; tab-size: 2; }
 .reference-update { display: grid; gap: 11px; padding: 11px; border: 1px solid #dfe8df; border-left: 3px solid #73a280; border-radius: 4px; background: #f7faf7; }
 .reference-update > div { display: grid; gap: 4px; }
 .reference-update strong { color: #45634e; font-size: 10px; }
@@ -220,6 +225,9 @@ tbody tr.active-row { background: #f7faf7; }
 .merge-empty { margin: 0; color: #9aa49d; font-size: 9px; }
 .merge-error { margin: 0; padding: 8px 10px; border-radius: 4px; background: #fcf3f1; color: #a24e40; font-size: 9px; line-height: 1.5; }
 .merge-selected-count { margin-right: auto; align-self: center; color: #738078; font: 9px var(--mono); }
+.paste-config-dialog { width: min(100%, 680px); }
+.paste-config-dialog .yaml-editor { min-height: min(42vh, 360px) !important; }
+.paste-error { margin: 0; padding: 8px 10px; border-radius: 4px; background: #fcf3f1; color: #a24e40; font-size: 9px; line-height: 1.5; }
 .form-warning { margin: 0; padding: 9px 10px; background: #fbf5e9; color: #94723b; border-radius: 4px; font-size: 9px; line-height: 1.5; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 5px; padding-top: 14px; border-top: 1px solid #edf0ed; }
 .secondary-button { min-height: 35px; padding: 0 12px; border: 1px solid #dfe6e0; border-radius: 5px; background: #fff; color: #657169; font-size: 10px; font-weight: 600; cursor: pointer; }

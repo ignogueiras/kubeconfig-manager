@@ -65,6 +65,95 @@ export async function createConfigFileFromData(path: string, config: KubeConfig)
 
 export type MergeSelection = { config: KubeConfig; clusters: string[]; users: string[]; contexts: string[] };
 
+function parseYamlMapping(source: unknown, message: string): Record<string, any> {
+  if (typeof source !== 'string' || !source.trim()) throw new ApiError(400, message);
+  const document = parseDocument(source, { uniqueKeys: true });
+  if (document.errors.length) throw new ApiError(400, message);
+  const value = document.toJS();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, message);
+  return value;
+}
+
+function validateRawEntity(config: KubeConfig, kind: EntityKind, value: Record<string, any>): string {
+  if (typeof value.name !== 'string') throw new ApiError(400, 'Raw entity YAML must include a string name.');
+  const name = value.name;
+  validateName(name);
+  const payloadKey = kind === 'clusters' ? 'cluster' : kind === 'users' ? 'user' : 'context';
+  const payload = value[payloadKey];
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new ApiError(400, `Raw ${kind.slice(0, -1)} YAML must include a ${payloadKey} mapping.`);
+  }
+  if (kind === 'clusters' && (typeof payload.server !== 'string' || !/^https?:\/\//i.test(payload.server))) {
+    throw new ApiError(400, 'Cluster server must be an HTTP or HTTPS URL.');
+  }
+  if (kind === 'contexts') {
+    if (typeof payload.cluster !== 'string' || !payload.cluster) throw new ApiError(400, 'A context needs a cluster reference.');
+    if (typeof payload.user !== 'string' || !payload.user) throw new ApiError(400, 'A context needs a user reference.');
+    if (!(config.clusters ?? []).some((entry: any) => entry.name === payload.cluster)) throw new ApiError(400, 'Select an existing cluster.');
+    if (!(config.users ?? []).some((entry: any) => entry.name === payload.user)) throw new ApiError(400, 'Select an existing user.');
+  }
+  return name;
+}
+
+export function upsertRawEntity(config: KubeConfig, kind: EntityKind, source: unknown, originalName?: string, updateReferences = false) {
+  const value = parseYamlMapping(source, 'Enter one valid YAML entity mapping.');
+  const name = validateRawEntity(config, kind, value);
+  const entries: any[] = config[kind] ?? [];
+  const originalIndex = originalName ? entries.findIndex((entry) => entry.name === originalName) : -1;
+  if (originalName && originalIndex < 0) throw new ApiError(404, 'Entity to edit was not found in the selected config.');
+  const nameIndex = entries.findIndex((entry) => entry.name === name);
+  if (originalIndex >= 0 && nameIndex >= 0 && nameIndex !== originalIndex) {
+    throw new ApiError(409, `A ${kind.slice(0, -1)} named "${name}" already exists.`);
+  }
+  const index = originalIndex >= 0 ? originalIndex : nameIndex;
+  const previousName = index >= 0 ? entries[index].name : undefined;
+
+  if (previousName && previousName !== name) {
+    if (kind === 'clusters' || kind === 'users') {
+      const refKey = kind === 'clusters' ? 'cluster' : 'user';
+      const affectedContexts = (config.contexts ?? []).filter((item: any) => item.context?.[refKey] === previousName);
+      if (affectedContexts.length && !updateReferences) {
+        throw new ApiError(409, `Rename affects contexts: ${affectedContexts.map((item: any) => item.name).join(', ')}. Enable reference updates or keep the current name.`);
+      }
+      for (const item of affectedContexts) item.context[refKey] = name;
+    } else if (config['current-context'] === previousName) {
+      config['current-context'] = name;
+    }
+  }
+
+  if (index >= 0) entries[index] = value;
+  else entries.push(value);
+  config[kind] = entries;
+  return sanitizeConfig(config);
+}
+
+export function mergeConfigYaml(target: KubeConfig, source: unknown): KubeConfig {
+  const config = parseYamlMapping(source, 'Enter a valid kubeconfig YAML document.');
+  if (config.kind !== 'Config') throw new ApiError(400, 'The pasted document is not a Kubernetes kubeconfig.');
+  for (const kind of ['clusters', 'users', 'contexts'] as EntityKind[]) {
+    if (config[kind] !== undefined && !Array.isArray(config[kind])) throw new ApiError(400, `Kubeconfig ${kind} must be a list.`);
+    config[kind] ??= [];
+  }
+  for (const kind of ['clusters', 'users', 'contexts'] as EntityKind[]) {
+    const names = new Set<string>();
+    for (const entity of config[kind]) {
+      if (!entity || typeof entity !== 'object' || Array.isArray(entity)) throw new ApiError(400, `Kubeconfig ${kind} must contain entity mappings.`);
+      const name = validateRawEntity(config, kind, entity);
+      if (names.has(name)) throw new ApiError(400, `Kubeconfig contains duplicate ${kind.slice(0, -1)} names.`);
+      names.add(name);
+    }
+  }
+  if (!config.clusters.length && !config.users.length && !config.contexts.length) {
+    throw new ApiError(400, 'The pasted kubeconfig contains no entities to add.');
+  }
+  return mergeSelectedEntities(target, [{
+    config,
+    clusters: config.clusters.map((entity: any) => entity.name),
+    users: config.users.map((entity: any) => entity.name),
+    contexts: config.contexts.map((entity: any) => entity.name),
+  }]);
+}
+
 export function mergeSelectedEntities(target: KubeConfig, selections: MergeSelection[]): KubeConfig {
   const additions: Record<EntityKind, Map<string, any>> = {
     clusters: new Map(),

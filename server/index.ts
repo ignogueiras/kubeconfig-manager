@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { access } from 'node:fs/promises';
-import { ApiError, configExists, createConfigFile, createConfigFileFromData, deleteEntity, mergeSelectedEntities, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, type EntityKind } from './kubeconfig.js';
+import { ApiError, configExists, createConfigFile, createConfigFileFromData, deleteEntity, mergeConfigYaml, mergeSelectedEntities, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, upsertRawEntity, type EntityKind } from './kubeconfig.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 4174);
@@ -163,6 +163,13 @@ app.post('/api/files/merge', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+app.post('/api/config/paste', async (request, response, next) => {
+  try {
+    const path = await selectedPath(request.query.path);
+    await mutate(path, (config) => mergeConfigYaml(config, request.body.yaml), response);
+  } catch (error) { next(error); }
+});
+
 app.delete('/api/files', async (request, response, next) => {
   try {
     const path = await selectedPath(request.body.path);
@@ -184,7 +191,9 @@ app.post('/api/entities/:kind', async (request, response, next) => {
     const kind = request.params.kind as EntityKind;
     if (!entityKinds.has(kind)) throw new ApiError(404, 'Unknown entity type.');
     const path = await selectedPath(request.query.path);
-    await mutate(path, (config) => upsertEntity(config, kind, String(request.body.name ?? ''), request.body), response);
+    await mutate(path, (config) => typeof request.body.rawEntity === 'string'
+      ? upsertRawEntity(config, kind, request.body.rawEntity, undefined, request.body.updateReferences === true)
+      : upsertEntity(config, kind, String(request.body.name ?? ''), request.body), response);
   } catch (error) { next(error); }
 });
 
@@ -194,7 +203,9 @@ app.patch('/api/entities/:kind/:name', async (request, response, next) => {
     if (!entityKinds.has(kind)) throw new ApiError(404, 'Unknown entity type.');
     const name = String(request.body.name ?? request.params.name);
     const path = await selectedPath(request.query.path);
-    await mutate(path, (config) => upsertEntity(config, kind, name, { ...request.body, originalName: request.params.name }), response);
+    await mutate(path, (config) => typeof request.body.rawEntity === 'string'
+      ? upsertRawEntity(config, kind, request.body.rawEntity, request.params.name, request.body.updateReferences === true)
+      : upsertEntity(config, kind, name, { ...request.body, originalName: request.params.name }), response);
   } catch (error) { next(error); }
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { AlertCircle, Boxes, Check, ChevronDown, CircleHelp, Command, Copy, Database, FileKey2, FilePlus2, FolderOpen, GitMerge, Layers3, LoaderCircle, Plus, RefreshCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertCircle, Boxes, Check, ChevronDown, CircleHelp, ClipboardPaste, Command, Copy, Database, FileKey2, FilePlus2, FolderOpen, GitMerge, Layers3, LoaderCircle, Plus, RefreshCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 
 type Cluster = { name: string; server: string; tlsServerName: string; insecureSkipTlsVerify: boolean; certificateAuthorityPresent: boolean };
 type User = { name: string; authType: string };
@@ -46,6 +46,7 @@ export default function App() {
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
   const [fileDialog, setFileDialog] = useState<'open' | 'create' | 'duplicate' | null>(null);
   const [mergeDialog, setMergeDialog] = useState(false);
+  const [pasteConfigDialog, setPasteConfigDialog] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function refresh() {
@@ -174,6 +175,17 @@ export default function App() {
     } finally { setBusy(false); }
   }
 
+  async function pasteConfig(yaml: string) {
+    setBusy(true);
+    try {
+      const next = await api<ConfigState>(`/config/paste?path=${encodeURIComponent(selectedPath)}`, { method: 'POST', body: JSON.stringify({ yaml }) });
+      setConfig(next);
+      persistFiles(files.map((file) => file.path === selectedPath ? { ...file, exists: true } : file));
+      setPasteConfigDialog(false);
+      setNotice({ text: `Pasted config entities added to ${fileName(selectedPath)}.${next.backupCreated ? ' A backup was saved.' : ' The new file was created.'}` });
+    } finally { setBusy(false); }
+  }
+
   async function removeFile(path: string) {
     if (!window.confirm(`Remove ${path} from this manager? The file on disk will not be deleted.`)) return;
     setBusy(true);
@@ -278,6 +290,7 @@ export default function App() {
           <div className="sidebar-file-actions">
             <button onClick={() => setFileDialog('open')} disabled={busy} aria-label="Open config" title="Open config"><FolderOpen size={14} /><span>Open config</span></button>
             <button onClick={() => setFileDialog('duplicate')} disabled={busy || !selectedPath} aria-label="Duplicate config" title="Duplicate selected config"><Copy size={14} /><span>Duplicate config</span></button>
+            <button onClick={() => setPasteConfigDialog(true)} disabled={busy || !selectedPath} aria-label="Paste full config" title="Paste entities from a full config"><ClipboardPaste size={14} /><span>Paste config</span></button>
             <button onClick={() => setFileDialog('create')} disabled={busy} aria-label="New config" title="New config"><FilePlus2 size={14} /><span>New config</span></button>
             <button onClick={() => setMergeDialog(true)} disabled={busy || files.length < 2} aria-label="Merge configs" title="Merge configs"><GitMerge size={14} /><span>Merge configs</span></button>
           </div>
@@ -341,6 +354,7 @@ export default function App() {
       {notice && <div className={`toast ${notice.error ? 'toast-error' : ''}`} role="status"><span className="toast-icon">{notice.error ? <AlertCircle size={16} /> : <Check size={16} />}</span>{notice.text}<button onClick={() => setNotice(null)} aria-label="Dismiss"><X size={15} /></button></div>}
       {fileDialog && <AddFileDialog initialMode={fileDialog} busy={busy} sourceName={fileName(selectedPath)} onClose={() => setFileDialog(null)} onAdd={(path) => void addFile(path)} onCreate={(path) => void submitNewFile(path)} onDuplicate={(path) => void submitDuplicateFile(path)} onBrowse={browsePath} />}
       {mergeDialog && <MergeDialog files={files} targetPath={selectedPath} busy={busy} onClose={() => setMergeDialog(false)} onMerge={mergeConfigs} />}
+      {pasteConfigDialog && <PasteConfigDialog busy={busy} targetName={fileName(selectedPath)} onClose={() => setPasteConfigDialog(false)} onPaste={pasteConfig} />}
       {dialog && <EntityDialog kind={dialog.kind} entity={dialog.entity} config={config} busy={busy} onClose={() => setDialog(null)} onSave={(values) => void saveEntity(dialog.kind, values, (dialog.entity as any)?.name)} />}
     </div>
   );
@@ -363,6 +377,20 @@ function AddFileDialog({ initialMode, busy, sourceName, onClose, onAdd, onCreate
     <header className="dialog-header"><span className="dialog-icon"><FilePlus2 size={18} /></span><div><h2 id="file-dialog-title">Kubeconfig file</h2><p>Open, create, or duplicate an independent file.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={17} /></button></header>
     <div className="file-mode-tabs" role="tablist" aria-label="File action"><button type="button" role="tab" aria-selected={mode === 'open'} className={mode === 'open' ? 'active' : ''} onClick={() => setMode('open')}>Open existing</button><button type="button" role="tab" aria-selected={mode === 'create'} className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>Create new</button><button type="button" role="tab" aria-selected={mode === 'duplicate'} className={mode === 'duplicate' ? 'active' : ''} onClick={() => setMode('duplicate')}>Duplicate selected</button></div>
     <form onSubmit={submit} className="dialog-form"><label className="field-label">{mode === 'open' ? 'Kubeconfig path' : 'New config path'}<span className="path-entry"><input required autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder={mode === 'open' ? '/home/user/.kube/staging-config' : '/home/user/.kube/new-config'} /><button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><FolderOpen size={14} /> Browse</button></span></label><p className="secret-notice"><ShieldCheck size={15} />{mode === 'open' ? 'The selected existing file is validated and managed independently.' : mode === 'create' ? 'Creates a valid empty kubeconfig and will not overwrite an existing file.' : `Copies all entities from ${sourceName} to a new file. The source is unchanged; the destination must not exist.`}</p><div className="dialog-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !path.trim()}>{busy ? <LoaderCircle className="spin" size={15} /> : mode === 'open' ? <FilePlus2 size={15} /> : mode === 'create' ? <Plus size={15} /> : <Copy size={15} />}{mode === 'open' ? 'Open file' : mode === 'create' ? 'Create config' : 'Duplicate config'}</button></div></form>
+  </section></div>;
+}
+
+function PasteConfigDialog({ busy, targetName, onClose, onPaste }: { busy: boolean; targetName: string; onClose: () => void; onPaste: (yaml: string) => Promise<void> }) {
+  const [yaml, setYaml] = useState('');
+  const [error, setError] = useState('');
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    try { await onPaste(yaml); }
+    catch (pasteError) { setError((pasteError as Error).message); }
+  }
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><section className="entity-dialog paste-config-dialog" role="dialog" aria-modal="true" aria-labelledby="paste-config-title">
+    <header className="dialog-header"><span className="dialog-icon"><ClipboardPaste size={18} /></span><div><h2 id="paste-config-title">Paste full kubeconfig</h2><p>Add its entities to {targetName}.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog" disabled={busy}><X size={17} /></button></header>
+    <form className="dialog-form" onSubmit={(event) => void submit(event)}><label className="field-label">Kubeconfig YAML<textarea required autoFocus spellCheck={false} value={yaml} onChange={(event) => { setYaml(event.target.value); setError(''); }} placeholder={'apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []'} /></label><p className="secret-notice"><ShieldCheck size={15} />All pasted entities are added to the selected file. Conflicting names stop the import. Pasted credentials stay local and are never returned to the interface.</p>{error && <p className="paste-error" role="alert">{error}</p>}<div className="dialog-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !yaml.trim()}>{busy ? <LoaderCircle className="spin" size={15} /> : <ClipboardPaste size={15} />}Add entities</button></div></form>
   </section></div>;
 }
 
@@ -484,6 +512,8 @@ function RowActions({ onEdit, onDelete, disabled }: { onEdit: () => void; onDele
 
 function EntityDialog({ kind, entity, config, busy, onClose, onSave }: { kind: Kind; entity?: Cluster | User | Context; config: ConfigState; busy: boolean; onClose: () => void; onSave: (values: Record<string, unknown>) => void }) {
   const editing = Boolean(entity);
+  const [editorMode, setEditorMode] = useState<'fields' | 'raw'>('fields');
+  const [rawEntity, setRawEntity] = useState('');
   const [name, setName] = useState(entity?.name ?? '');
   const [updateReferences, setUpdateReferences] = useState(true);
   const [server, setServer] = useState((entity as Cluster)?.server ?? '');
@@ -501,12 +531,19 @@ function EntityDialog({ kind, entity, config, busy, onClose, onSave }: { kind: K
   const [user, setUser] = useState((entity as Context)?.user ?? config.users[0]?.name ?? '');
   const [namespace, setNamespace] = useState((entity as Context)?.namespace ?? 'default');
   const referenceKey = kind === 'clusters' ? 'cluster' : 'user';
-  const affectedContexts = editing && (kind === 'clusters' || kind === 'users') && name !== entity?.name
+  const referencedContexts = editing && (kind === 'clusters' || kind === 'users')
     ? config.contexts.filter((context) => context[referenceKey] === entity?.name)
+    : [];
+  const affectedContexts = editing && (kind === 'clusters' || kind === 'users') && name !== entity?.name
+    ? referencedContexts
     : [];
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (editorMode === 'raw') {
+      onSave({ rawEntity, updateReferences });
+      return;
+    }
     const common = { name, originalName: entity?.name, updateReferences };
     if (kind === 'clusters') onSave({ ...common, server, tlsServerName, insecureSkipTlsVerify: insecure });
     else if (kind === 'users') onSave({ ...common, authType, token, command, args: args.split(/\s+/).filter(Boolean), username, password, clientCertificate, clientKey });
@@ -515,12 +552,16 @@ function EntityDialog({ kind, entity, config, busy, onClose, onSave }: { kind: K
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
     <header className="dialog-header"><span className="dialog-icon">{kind === 'clusters' ? <Boxes size={18} /> : kind === 'users' ? <FileKey2 size={18} /> : <Layers3 size={18} />}</span><div><h2 id="dialog-title">{editing ? 'Edit' : 'Add'} {labels[kind].slice(0, -1).toLowerCase()}</h2><p>Changes are validated and backed up before saving.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={17} /></button></header>
-    <form onSubmit={submit} className="dialog-form"><label className="field-label">Name<input required maxLength={253} value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. production-eu" /></label>
+    <form onSubmit={submit} className="dialog-form">
+      <div className="entity-mode-tabs" role="tablist" aria-label="Entity input mode"><button type="button" role="tab" aria-selected={editorMode === 'fields'} className={editorMode === 'fields' ? 'active' : ''} onClick={() => setEditorMode('fields')}>Fields</button><button type="button" role="tab" aria-selected={editorMode === 'raw'} className={editorMode === 'raw' ? 'active' : ''} onClick={() => setEditorMode('raw')}>Raw YAML</button></div>
+      {editorMode === 'raw' ? <><label className="field-label">{labels[kind].slice(0, -1)} YAML<textarea required autoFocus spellCheck={false} className="yaml-editor" value={rawEntity} onChange={(event) => setRawEntity(event.target.value)} placeholder={kind === 'clusters' ? 'name: production-eu\ncluster:\n  server: https://api.example.com:6443' : kind === 'users' ? 'name: operator\nuser:\n  token: paste-token-here' : 'name: production-admin\ncontext:\n  cluster: production-eu\n  user: operator\n  namespace: default'} /></label><p className="secret-notice"><ShieldCheck size={15} />Paste one complete Kubernetes entity. Its full mapping replaces the entity on edit, including credential fields.</p>{referencedContexts.length > 0 && <div className="reference-update"><div><strong>Currently used by {referencedContexts.length} {referencedContexts.length === 1 ? 'context' : 'contexts'}</strong><span>{referencedContexts.map((context) => context.name).join(', ')}</span></div><label><input type="checkbox" checked={updateReferences} onChange={(event) => setUpdateReferences(event.target.checked)} /><span>Update references if the pasted name changes</span></label></div>}</> : <>
+      <label className="field-label">Name<input required maxLength={253} value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. production-eu" /></label>
       {affectedContexts.length > 0 && <div className="reference-update"><div><strong>Used by {affectedContexts.length} {affectedContexts.length === 1 ? 'context' : 'contexts'}</strong><span>{affectedContexts.map((context) => context.name).join(', ')}</span></div><label><input type="checkbox" checked={updateReferences} onChange={(event) => setUpdateReferences(event.target.checked)} /><span>Update these references to the new name</span></label>{!updateReferences && <small>Saving is blocked to prevent these contexts from pointing to a missing name.</small>}</div>}
       {kind === 'clusters' && <><label className="field-label">API server<input type="url" required value={server} onChange={(event) => setServer(event.target.value)} placeholder="https://api.example.com:6443" /></label><label className="field-label">TLS server name <span className="optional">OPTIONAL</span><input value={tlsServerName} onChange={(event) => setTlsServerName(event.target.value)} placeholder="Override certificate hostname" /></label><label className="toggle-field"><span><strong>Skip TLS verification</strong><small>Use only for clusters with a trusted network boundary.</small></span><input type="checkbox" checked={insecure} onChange={(event) => setInsecure(event.target.checked)} /></label></>}
       {kind === 'users' && <><label className="field-label">Authentication method<select value={authType} onChange={(event) => setAuthType(event.target.value)}><option value="token">Bearer token</option><option value="exec">Exec plugin</option><option value="certificate">Client certificate</option><option value="basic">Username and password</option>{authType === 'auth-provider' && <option value="auth-provider" disabled>Auth provider (preserved)</option>}</select></label>{authType === 'token' ? <label className="field-label">Bearer token <span className="optional">WRITE ONLY</span><input type="password" autoComplete="new-password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={editing ? 'Leave blank to keep existing credential' : 'Paste token'} /></label> : authType === 'exec' ? <><label className="field-label">Command<input required={!editing} value={command} onChange={(event) => setCommand(event.target.value)} placeholder={editing ? 'Leave blank to keep existing command' : 'e.g. aws'} /></label><label className="field-label">Arguments <span className="optional">SPACE SEPARATED</span><input value={args} onChange={(event) => setArgs(event.target.value)} placeholder={editing ? 'Leave blank to keep existing arguments' : 'eks get-token --cluster-name ...'} /></label></> : authType === 'certificate' ? <><label className="field-label">Client certificate path<input value={clientCertificate} onChange={(event) => setClientCertificate(event.target.value)} placeholder={editing ? 'Leave blank to keep existing certificate' : '/path/to/client.crt'} /></label><label className="field-label">Client key path<input type="password" autoComplete="new-password" value={clientKey} onChange={(event) => setClientKey(event.target.value)} placeholder={editing ? 'Leave blank to keep existing key' : '/path/to/client.key'} /></label></> : authType === 'basic' ? <><label className="field-label">Username<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder={editing ? 'Leave blank to keep existing username' : 'Username'} /></label><label className="field-label">Password <span className="optional">WRITE ONLY</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={editing ? 'Leave blank to keep existing password' : 'Password'} /></label></> : <p className="secret-notice"><ShieldCheck size={15} /> This auth-provider configuration is preserved as-is. You can rename this user without exposing provider credentials.</p>}<p className="secret-notice"><ShieldCheck size={15} /> Stored credentials and exec arguments are never displayed. Leave fields blank to preserve them.</p></>}
       {kind === 'contexts' && <><label className="field-label">Cluster<select required value={cluster} onChange={(event) => setCluster(event.target.value)}><option value="" disabled>Select cluster</option>{config.clusters.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label><label className="field-label">User<select required value={user} onChange={(event) => setUser(event.target.value)}><option value="" disabled>Select user</option>{config.users.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label><label className="field-label">Namespace<input value={namespace} onChange={(event) => setNamespace(event.target.value)} placeholder="default" /></label>{(config.clusters.length === 0 || config.users.length === 0) && <p className="form-warning">Add at least one cluster and one user before creating a context.</p>}</>}
-      <div className="dialog-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy || (kind === 'contexts' && (!config.clusters.length || !config.users.length))}>{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{editing ? 'Save changes' : 'Create'} </button></div>
+      </>}
+      <div className="dialog-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy || (editorMode === 'fields' && kind === 'contexts' && (!config.clusters.length || !config.users.length)) || (editorMode === 'raw' && !rawEntity.trim())}>{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{editing ? 'Save changes' : 'Create'} </button></div>
     </form>
   </section></div>;
 }

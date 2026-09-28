@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { configExists, createConfigFile, createConfigFileFromData, deleteEntity, mergeSelectedEntities, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, type KubeConfig } from './kubeconfig.js';
+import { configExists, createConfigFile, createConfigFileFromData, deleteEntity, mergeConfigYaml, mergeSelectedEntities, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, upsertRawEntity, type KubeConfig } from './kubeconfig.js';
 
 const folders: string[] = [];
 
@@ -148,6 +148,40 @@ describe('kubeconfig entity operations', () => {
     expect(() => mergeSelectedEntities(target, [{ config: source, clusters: [], users: [], contexts: ['prod-admin'] }])).toThrow(/select its cluster/);
     target.clusters = [{ name: 'prod', cluster: { server: 'https://other.example.test' } }];
     expect(() => mergeSelectedEntities(target, [{ config: source, clusters: ['prod'], users: [], contexts: [] }])).toThrow(/different entity/);
+  });
+
+  it('accepts full raw entity mappings while sanitizing their credentials', () => {
+    const config = fixture();
+    upsertRawEntity(config, 'users', `name: raw-user\nuser:\n  token: raw-secret\n  auth-provider:\n    name: custom\n    config:\n      client-secret: provider-secret\n`);
+    expect(config.users.find((entry: any) => entry.name === 'raw-user').user['auth-provider'].config['client-secret']).toBe('provider-secret');
+    const summary = JSON.stringify(sanitizeConfig(config));
+    expect(summary).not.toContain('raw-secret');
+    expect(summary).not.toContain('provider-secret');
+  });
+
+  it('validates raw entity shapes, context references, and rename propagation', () => {
+    const config = fixture();
+    expect(() => upsertRawEntity(config, 'clusters', 'name: incomplete\ncluster: {}')).toThrow(/HTTP or HTTPS/);
+    expect(() => upsertRawEntity(config, 'contexts', 'name: broken\ncontext:\n  cluster: missing\n  user: operator')).toThrow(/existing cluster/);
+    expect(() => upsertRawEntity(config, 'clusters', 'name: renamed-prod\ncluster:\n  server: https://prod.example.test', 'prod')).toThrow(/Rename affects contexts/);
+    upsertRawEntity(config, 'clusters', 'name: renamed-prod\ncluster:\n  server: https://prod.example.test', 'prod', true);
+    expect(config.contexts[0].context.cluster).toBe('renamed-prod');
+  });
+
+  it('pastes a complete kubeconfig into the target without exposing secrets', () => {
+    const target: KubeConfig = { kind: 'Config', clusters: [], users: [], contexts: [], 'current-context': '' };
+    const source = `apiVersion: v1\nkind: Config\nclusters:\n  - name: pasted-cluster\n    cluster:\n      server: https://pasted.example.test\nusers:\n  - name: pasted-user\n    user:\n      token: pasted-secret\ncontexts:\n  - name: pasted-context\n    context:\n      cluster: pasted-cluster\n      user: pasted-user\n`;
+    mergeConfigYaml(target, source);
+    expect(target.contexts[0].name).toBe('pasted-context');
+    expect(target.users[0].user.token).toBe('pasted-secret');
+    expect(JSON.stringify(sanitizeConfig(target))).not.toContain('pasted-secret');
+  });
+
+  it('rejects malformed full configs and duplicate pasted names without echoing source data', () => {
+    const target: KubeConfig = { kind: 'Config', clusters: [], users: [], contexts: [] };
+    expect(() => mergeConfigYaml(target, 'kind: Config\nusers: [')).toThrow('Enter a valid kubeconfig YAML document.');
+    const duplicate = `kind: Config\nclusters:\n  - name: duplicate\n    cluster:\n      server: https://one.example.test\n  - name: duplicate\n    cluster:\n      server: https://two.example.test\n`;
+    expect(() => mergeConfigYaml(target, duplicate)).toThrow(/duplicate cluster names/);
   });
 });
 

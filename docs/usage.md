@@ -30,6 +30,8 @@ Use **Duplicate selected** to copy every entity from the currently selected conf
 
 Use **Merge configs** to choose individual clusters, users, and contexts from the other loaded files and add them to the currently selected destination. The source files remain unchanged, and a backup is made when the destination already exists. Same-name entities with different definitions are rejected. When importing a context, include its cluster and user unless they already exist in the destination.
 
+Use **Paste config** to add every cluster, user, and context in a pasted full kubeconfig to the selected file. The same conflict checks and backup behavior apply. In the cluster, user, or context editor, switch to **Raw YAML** to paste one complete entity mapping instead of filling in individual fields. Raw entity edits replace the full entity, including credentials and less common Kubernetes fields; context references are validated before saving.
+
 A missing file can also be added through **Open config** by entering its intended path. It appears as an empty config and is created only when you save the first entity. A missing-file marker appears beside its name in the sidebar.
 
 Removing a non-default file from the sidebar only removes it from the manager. It does not delete the file from disk. The default config cannot be removed from the list.
