@@ -13,6 +13,19 @@ npm run dev
 
 Open the Vite URL printed in the terminal (normally `http://127.0.0.1:5173`). The interface and API bind to localhost. To run a production build, use `npm run build` and then `npm start`; the server serves the built interface on `http://127.0.0.1:4174`.
 
+## Linux desktop app
+
+Build an AppImage on Linux with:
+
+```sh
+npm install
+npm run package:linux
+```
+
+The executable is written to `release/`. It bundles Electron and the application, so end users do not need Node.js installed. Launch the AppImage from any working directory. The desktop app uses the operating system's native file chooser; it does not require `zenity` or `kdialog`. AppImage runtime support, including FUSE on distributions that require it, must be available on the target system.
+
+This first package target is Linux x64 AppImage. Debian packages and other distributions are not produced yet. Build and test release artifacts on Linux; local browser development still requires Node.js 20 or newer.
+
 ## Features
 
 - Browse and search contexts, clusters, and users.
