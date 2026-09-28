@@ -1,16 +1,22 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { AlertCircle, Boxes, Check, ChevronDown, CircleHelp, Command, Copy, Database, FileKey2, FilePlus2, FolderOpen, Layers3, LoaderCircle, Plus, RefreshCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
+import { AlertCircle, Boxes, Check, ChevronDown, CircleHelp, Command, Copy, Database, FileKey2, FilePlus2, FolderOpen, GitMerge, Layers3, LoaderCircle, Plus, RefreshCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 
 type Cluster = { name: string; server: string; tlsServerName: string; insecureSkipTlsVerify: boolean; certificateAuthorityPresent: boolean };
 type User = { name: string; authType: string };
 type Context = { name: string; cluster: string; user: string; namespace: string; current: boolean };
-type ConfigState = { currentContext: string; clusters: Cluster[]; users: User[]; contexts: Context[]; configPath: string; exists: boolean; backupCreated?: boolean };
-type ConfigFile = { path: string; exists: boolean };
+type ConfigState = { currentContext: string; clusters: Cluster[]; users: User[]; contexts: Context[]; configPath: string; exists: boolean; isDefault: boolean; backupCreated?: boolean };
+type ConfigFile = { path: string; exists: boolean; isDefault: boolean };
+type MergeSourceSelection = { path: string; clusters: string[]; users: string[]; contexts: string[] };
 type Kind = 'clusters' | 'contexts' | 'users';
 type Tab = Kind;
 
-const empty: ConfigState = { currentContext: '', clusters: [], users: [], contexts: [], configPath: '', exists: false };
+const empty: ConfigState = { currentContext: '', clusters: [], users: [], contexts: [], configPath: '', exists: false, isDefault: false };
 const labels: Record<Kind, string> = { clusters: 'Clusters', contexts: 'Contexts', users: 'Users' };
+const mergePalette = ['#397350', '#547a8b', '#b28642', '#806b87', '#66866f', '#ad6554', '#54749a', '#8a8050'];
+
+function mergeGroupColor(index: number) {
+  return mergePalette[index] ?? `hsl(${Math.round((index * 137.508) % 360)} 30% 40%)`;
+}
 
 function fileName(path: string) {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) ?? path;
@@ -38,7 +44,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
-  const [fileDialog, setFileDialog] = useState<'open' | 'create' | null>(null);
+  const [fileDialog, setFileDialog] = useState<'open' | 'create' | 'duplicate' | null>(null);
+  const [mergeDialog, setMergeDialog] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function refresh() {
@@ -69,7 +76,7 @@ export default function App() {
         for (const path of paths) {
           if (!registered.some((file) => file.path === path)) {
             const file = await api<ConfigState>('/files', { method: 'POST', body: JSON.stringify({ path }) });
-            registered.push({ path: file.configPath, exists: file.exists });
+            registered.push({ path: file.configPath, exists: file.exists, isDefault: file.isDefault });
           }
         }
         if (!active) return;
@@ -105,7 +112,7 @@ export default function App() {
     setBusy(true);
     try {
       const next = await api<ConfigState>('/files', { method: 'POST', body: JSON.stringify({ path }) });
-      const nextFiles = [...files.filter((file) => file.path !== next.configPath), { path: next.configPath, exists: next.exists }];
+      const nextFiles = [...files.filter((file) => file.path !== next.configPath), { path: next.configPath, exists: next.exists, isDefault: next.isDefault }];
       persistFiles(nextFiles);
       setSelectedPath(next.configPath);
       window.localStorage.setItem('kubeconfig-manager-selected-file', next.configPath);
@@ -131,7 +138,7 @@ export default function App() {
     setBusy(true);
     try {
       const next = await api<ConfigState>('/files/create', { method: 'POST', body: JSON.stringify({ path }) });
-      const nextFiles = [...files.filter((file) => file.path !== next.configPath), { path: next.configPath, exists: true }];
+      const nextFiles = [...files.filter((file) => file.path !== next.configPath), { path: next.configPath, exists: true, isDefault: next.isDefault }];
       persistFiles(nextFiles);
       setSelectedPath(next.configPath);
       window.localStorage.setItem('kubeconfig-manager-selected-file', next.configPath);
@@ -140,6 +147,31 @@ export default function App() {
       setNotice({ text: 'New empty kubeconfig created. Add its first cluster, user, or context.' });
     } catch (error) { setNotice({ text: (error as Error).message, error: true }); }
     finally { setBusy(false); }
+  }
+
+  async function submitDuplicateFile(path: string) {
+    setBusy(true);
+    try {
+      const next = await api<ConfigState>('/files/duplicate', { method: 'POST', body: JSON.stringify({ sourcePath: selectedPath, targetPath: path }) });
+      persistFiles([...files.filter((file) => file.path !== next.configPath), { path: next.configPath, exists: true, isDefault: next.isDefault }]);
+      setSelectedPath(next.configPath);
+      window.localStorage.setItem('kubeconfig-manager-selected-file', next.configPath);
+      setConfig(next);
+      setFileDialog(null);
+      setNotice({ text: 'Config duplicated to a new file. The original was not changed.' });
+    } catch (error) { setNotice({ text: (error as Error).message, error: true }); }
+    finally { setBusy(false); }
+  }
+
+  async function mergeConfigs(sources: MergeSourceSelection[]) {
+    setBusy(true);
+    try {
+      const next = await api<ConfigState>('/files/merge', { method: 'POST', body: JSON.stringify({ targetPath: selectedPath, sources }) });
+      setConfig(next);
+      persistFiles(files.map((file) => file.path === selectedPath ? { ...file, exists: true } : file));
+      setMergeDialog(false);
+      setNotice({ text: `Selected entities merged into ${fileName(selectedPath)}.${next.backupCreated ? ' A backup was saved.' : ' The new file was created.'}` });
+    } finally { setBusy(false); }
   }
 
   async function removeFile(path: string) {
@@ -239,13 +271,15 @@ export default function App() {
                 <span className="sidebar-file-copy"><strong>{fileName(file.path)}</strong><small>{fileDirectory(file.path)}</small></span>
                 {!file.exists && <span className="missing-file-dot" title="File does not exist yet" />}
               </button>
-              {file.path !== files[0]?.path && <button className="sidebar-file-remove" onClick={() => void removeFile(file.path)} disabled={busy} title="Remove from list; keep file on disk" aria-label={`Remove ${file.path} from manager`}><X size={13} /></button>}
+              {!file.isDefault && <button className="sidebar-file-remove" onClick={() => void removeFile(file.path)} disabled={busy} title="Remove from list; keep file on disk" aria-label={`Remove ${file.path} from manager`}><X size={13} /></button>}
             </div>)}
             {files.length === 0 && <p className="no-files">No config files loaded.</p>}
           </div>
           <div className="sidebar-file-actions">
             <button onClick={() => setFileDialog('open')} disabled={busy} aria-label="Open config" title="Open config"><FolderOpen size={14} /><span>Open config</span></button>
+            <button onClick={() => setFileDialog('duplicate')} disabled={busy || !selectedPath} aria-label="Duplicate config" title="Duplicate selected config"><Copy size={14} /><span>Duplicate config</span></button>
             <button onClick={() => setFileDialog('create')} disabled={busy} aria-label="New config" title="New config"><FilePlus2 size={14} /><span>New config</span></button>
+            <button onClick={() => setMergeDialog(true)} disabled={busy || files.length < 2} aria-label="Merge configs" title="Merge configs"><GitMerge size={14} /><span>Merge configs</span></button>
           </div>
         </section>
       </aside>
@@ -305,28 +339,134 @@ export default function App() {
       </main>
 
       {notice && <div className={`toast ${notice.error ? 'toast-error' : ''}`} role="status"><span className="toast-icon">{notice.error ? <AlertCircle size={16} /> : <Check size={16} />}</span>{notice.text}<button onClick={() => setNotice(null)} aria-label="Dismiss"><X size={15} /></button></div>}
-      {fileDialog && <AddFileDialog initialMode={fileDialog} busy={busy} onClose={() => setFileDialog(null)} onAdd={(path) => void addFile(path)} onCreate={(path) => void submitNewFile(path)} onBrowse={browsePath} />}
+      {fileDialog && <AddFileDialog initialMode={fileDialog} busy={busy} sourceName={fileName(selectedPath)} onClose={() => setFileDialog(null)} onAdd={(path) => void addFile(path)} onCreate={(path) => void submitNewFile(path)} onDuplicate={(path) => void submitDuplicateFile(path)} onBrowse={browsePath} />}
+      {mergeDialog && <MergeDialog files={files} targetPath={selectedPath} busy={busy} onClose={() => setMergeDialog(false)} onMerge={mergeConfigs} />}
       {dialog && <EntityDialog kind={dialog.kind} entity={dialog.entity} config={config} busy={busy} onClose={() => setDialog(null)} onSave={(values) => void saveEntity(dialog.kind, values, (dialog.entity as any)?.name)} />}
     </div>
   );
 }
 
-function AddFileDialog({ initialMode, busy, onClose, onAdd, onCreate, onBrowse }: { initialMode: 'open' | 'create'; busy: boolean; onClose: () => void; onAdd: (path: string) => void; onCreate: (path: string) => void; onBrowse: (mode: 'open' | 'save') => Promise<string | undefined> }) {
+function AddFileDialog({ initialMode, busy, sourceName, onClose, onAdd, onCreate, onDuplicate, onBrowse }: { initialMode: 'open' | 'create' | 'duplicate'; busy: boolean; sourceName: string; onClose: () => void; onAdd: (path: string) => void; onCreate: (path: string) => void; onDuplicate: (path: string) => void; onBrowse: (mode: 'open' | 'save') => Promise<string | undefined> }) {
   const [path, setPath] = useState('');
-  const [mode, setMode] = useState<'open' | 'create'>(initialMode);
+  const [mode, setMode] = useState<'open' | 'create' | 'duplicate'>(initialMode);
   function submit(event: FormEvent) {
     event.preventDefault();
     if (mode === 'open') onAdd(path.trim());
-    else onCreate(path.trim());
+    else if (mode === 'create') onCreate(path.trim());
+    else onDuplicate(path.trim());
   }
   async function browse() {
     const selected = await onBrowse(mode === 'open' ? 'open' : 'save');
     if (selected) setPath(selected);
   }
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="entity-dialog file-dialog" role="dialog" aria-modal="true" aria-labelledby="file-dialog-title">
-    <header className="dialog-header"><span className="dialog-icon"><FilePlus2 size={18} /></span><div><h2 id="file-dialog-title">Kubeconfig file</h2><p>Open an independent file or create a new empty one.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={17} /></button></header>
-    <div className="file-mode-tabs" role="tablist" aria-label="File action"><button type="button" role="tab" aria-selected={mode === 'open'} className={mode === 'open' ? 'active' : ''} onClick={() => setMode('open')}>Open existing</button><button type="button" role="tab" aria-selected={mode === 'create'} className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>Create new</button></div>
-    <form onSubmit={submit} className="dialog-form"><label className="field-label">{mode === 'open' ? 'Kubeconfig path' : 'New config path'}<span className="path-entry"><input required autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder={mode === 'open' ? '/home/user/.kube/staging-config' : '/home/user/.kube/new-config'} /><button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><FolderOpen size={14} /> Browse</button></span></label><p className="secret-notice"><ShieldCheck size={15} />{mode === 'open' ? 'The selected existing file is validated and managed independently.' : 'Creates a valid empty kubeconfig and will not overwrite an existing file.'}</p><div className="dialog-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !path.trim()}>{busy ? <LoaderCircle className="spin" size={15} /> : mode === 'open' ? <FilePlus2 size={15} /> : <Plus size={15} />}{mode === 'open' ? 'Open file' : 'Create config'}</button></div></form>
+    <header className="dialog-header"><span className="dialog-icon"><FilePlus2 size={18} /></span><div><h2 id="file-dialog-title">Kubeconfig file</h2><p>Open, create, or duplicate an independent file.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={17} /></button></header>
+    <div className="file-mode-tabs" role="tablist" aria-label="File action"><button type="button" role="tab" aria-selected={mode === 'open'} className={mode === 'open' ? 'active' : ''} onClick={() => setMode('open')}>Open existing</button><button type="button" role="tab" aria-selected={mode === 'create'} className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>Create new</button><button type="button" role="tab" aria-selected={mode === 'duplicate'} className={mode === 'duplicate' ? 'active' : ''} onClick={() => setMode('duplicate')}>Duplicate selected</button></div>
+    <form onSubmit={submit} className="dialog-form"><label className="field-label">{mode === 'open' ? 'Kubeconfig path' : 'New config path'}<span className="path-entry"><input required autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder={mode === 'open' ? '/home/user/.kube/staging-config' : '/home/user/.kube/new-config'} /><button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><FolderOpen size={14} /> Browse</button></span></label><p className="secret-notice"><ShieldCheck size={15} />{mode === 'open' ? 'The selected existing file is validated and managed independently.' : mode === 'create' ? 'Creates a valid empty kubeconfig and will not overwrite an existing file.' : `Copies all entities from ${sourceName} to a new file. The source is unchanged; the destination must not exist.`}</p><div className="dialog-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !path.trim()}>{busy ? <LoaderCircle className="spin" size={15} /> : mode === 'open' ? <FilePlus2 size={15} /> : mode === 'create' ? <Plus size={15} /> : <Copy size={15} />}{mode === 'open' ? 'Open file' : mode === 'create' ? 'Create config' : 'Duplicate config'}</button></div></form>
+  </section></div>;
+}
+
+function MergeDialog({ files, targetPath, busy, onClose, onMerge }: { files: ConfigFile[]; targetPath: string; busy: boolean; onClose: () => void; onMerge: (sources: MergeSourceSelection[]) => Promise<void> }) {
+  const [sources, setSources] = useState<Array<{ file: ConfigFile; config?: ConfigState; error?: string }>>([]);
+  const [selections, setSelections] = useState<Record<string, Omit<MergeSourceSelection, 'path'>>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [activeKind, setActiveKind] = useState<Kind>('contexts');
+  const sourceFiles = files.filter((file) => file.path !== targetPath);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    void Promise.all(sourceFiles.map(async (file) => {
+      try { return { file, config: await api<ConfigState>(`/config?path=${encodeURIComponent(file.path)}`) }; }
+      catch (loadError) { return { file, error: (loadError as Error).message }; }
+    })).then((loaded) => { if (active) setSources(loaded); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [targetPath, files]);
+
+  function toggle(path: string, kind: Kind, name: string, checked: boolean) {
+    setSelections((current) => {
+      const next = { ...(current[path] ?? { clusters: [], users: [], contexts: [] }) };
+      const values = new Set(next[kind]);
+      if (kind === 'contexts' && checked) {
+        values.add(name);
+        const context = sources.find((source) => source.file.path === path)?.config?.contexts.find((item) => item.name === name);
+        if (context) {
+          if (context.cluster) next.clusters = [...new Set([...next.clusters, context.cluster])];
+          if (context.user) next.users = [...new Set([...next.users, context.user])];
+        }
+      } else if (checked) values.add(name);
+      else values.delete(name);
+      next[kind] = [...values];
+      return { ...current, [path]: next };
+    });
+    setError('');
+  }
+
+  const selectedCount = Object.values(selections).reduce((count, selection) => count + selection.clusters.length + selection.users.length + selection.contexts.length, 0);
+  const groupColors = new Map<string, string>();
+  for (const source of sources) {
+    for (const context of source.config?.contexts ?? []) {
+      const key = JSON.stringify([source.file.path, context.cluster, context.user]);
+      if (!groupColors.has(key)) groupColors.set(key, mergeGroupColor(groupColors.size));
+    }
+  }
+  const selectedGroupColors: Record<string, Record<Kind, Record<string, string[]>>> = {};
+  for (const source of sources) {
+    const sourceSelections = selections[source.file.path];
+    if (!sourceSelections) continue;
+    const entityColors: Record<Kind, Record<string, string[]>> = { clusters: {}, users: {}, contexts: {} };
+    for (const context of source.config?.contexts ?? []) {
+      if (!sourceSelections.contexts.includes(context.name)) continue;
+      const color = groupColors.get(JSON.stringify([source.file.path, context.cluster, context.user]));
+      if (!color) continue;
+      for (const [kind, name] of [['contexts', context.name], ['clusters', context.cluster], ['users', context.user]] as const) {
+        entityColors[kind][name] = [...new Set([...(entityColors[kind][name] ?? []), color])];
+      }
+    }
+    selectedGroupColors[source.file.path] = entityColors;
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const selectedSources = sourceFiles.map((file) => ({ path: file.path, ...(selections[file.path] ?? { clusters: [], users: [], contexts: [] }) }))
+      .filter((selection) => selection.clusters.length || selection.users.length || selection.contexts.length);
+    if (!selectedSources.length) {
+      setError('Select at least one entity to merge.');
+      return;
+    }
+    try { await onMerge(selectedSources); }
+    catch (mergeError) { setError((mergeError as Error).message); }
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><section className="entity-dialog merge-dialog" role="dialog" aria-modal="true" aria-labelledby="merge-dialog-title">
+    <header className="dialog-header"><span className="dialog-icon"><GitMerge size={18} /></span><div><h2 id="merge-dialog-title">Merge configs</h2><p>Choose entities to add to {fileName(targetPath)}.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog" disabled={busy}><X size={17} /></button></header>
+    <p className="merge-guidance">Source files stay unchanged. Selecting a context also selects its cluster and user. Matching color markers identify each context group; same-name conflicts are rejected.</p>
+    <form className="merge-form" onSubmit={(event) => void submit(event)}>
+      <div className="merge-kind-tabs" role="tablist" aria-label="Entity type to merge">
+        {(['contexts', 'clusters', 'users'] as Kind[]).map((kind) => {
+          const count = sources.reduce((total, source) => total + (source.config?.[kind].length ?? 0), 0);
+          return <button type="button" role="tab" aria-selected={activeKind === kind} className={activeKind === kind ? 'active' : ''} key={kind} onClick={() => setActiveKind(kind)}>{labels[kind]} <span>{count}</span></button>;
+        })}
+      </div>
+      <div className="merge-source-list">
+        {loading ? <div className="loading-state"><LoaderCircle className="spin" size={18} /> Loading source configs</div> : sources.map(({ file, config: sourceConfig, error: loadError }) => <section className="merge-source" key={file.path}>
+          <div className="merge-source-heading"><Database size={14} /><div><strong>{fileName(file.path)}</strong><span>{file.path}</span></div></div>
+          {loadError ? <p className="merge-error">{loadError}</p> : (() => {
+            const entities = sourceConfig?.[activeKind] ?? [];
+            return <div className="merge-category">{entities.length ? entities.map((entity: any) => {
+              const colors = selectedGroupColors[file.path]?.[activeKind][entity.name] ?? [];
+              const rowStyle = colors.length ? { '--merge-group-color': colors[0] } as CSSProperties : undefined;
+              return <label className={`merge-item ${colors.length ? 'has-merge-group' : ''}`} key={entity.name} style={rowStyle}><input type="checkbox" checked={(selections[file.path]?.[activeKind] ?? []).includes(entity.name)} onChange={(event) => toggle(file.path, activeKind, entity.name, event.target.checked)} /><span><strong>{entity.name}</strong>{activeKind === 'contexts' ? <small>{entity.cluster} · {entity.user}</small> : activeKind === 'clusters' ? <small>{entity.server}</small> : <small>{entity.authType}</small>}</span>{colors.length > 0 && <span className="merge-color-markers" aria-label={`${colors.length} context group${colors.length === 1 ? '' : 's'}`} title={`${colors.length} context group${colors.length === 1 ? '' : 's'}`}>{colors.map((color) => <i key={color} style={{ backgroundColor: color }} />)}</span>}</label>;
+            }) : <p className="merge-empty">No {labels[activeKind].toLowerCase()} in this file.</p>}</div>;
+          })()}
+        </section>)}
+        {!loading && !sources.length && <p className="merge-empty">Open another kubeconfig before merging.</p>}
+      </div>
+      {error && <p className="merge-error" role="alert">{error}</p>}
+      <div className="dialog-footer"><span className="merge-selected-count">{selectedCount} selected</span><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="primary-button" disabled={busy || loading || selectedCount === 0}>{busy ? <LoaderCircle className="spin" size={15} /> : <GitMerge size={15} />}Merge into destination</button></div>
+    </form>
   </section></div>;
 }
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { configExists, createConfigFile, deleteEntity, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, type KubeConfig } from './kubeconfig.js';
+import { configExists, createConfigFile, createConfigFileFromData, deleteEntity, mergeSelectedEntities, normalizeConfigPath, readConfig, sanitizeConfig, saveConfig, setCurrentContext, upsertEntity, type KubeConfig } from './kubeconfig.js';
 
 const folders: string[] = [];
 
@@ -133,6 +133,22 @@ describe('kubeconfig entity operations', () => {
     expect(config['current-context']).toBe('prod-admin');
     expect(() => setCurrentContext(config, 'missing')).toThrow(/Context not found/);
   });
+
+  it('merges only selected entities and preserves their full kubeconfig data', () => {
+    const target: KubeConfig = { kind: 'Config', clusters: [], users: [], contexts: [] };
+    mergeSelectedEntities(target, [{ config: fixture(), clusters: ['prod'], users: [], contexts: [] }]);
+    expect(target.clusters).toEqual(fixture().clusters);
+    expect(target.users).toEqual([]);
+    expect(target.contexts).toEqual([]);
+  });
+
+  it('requires selected context dependencies and rejects conflicting entity names', () => {
+    const source = fixture();
+    const target: KubeConfig = { kind: 'Config', clusters: [], users: [], contexts: [] };
+    expect(() => mergeSelectedEntities(target, [{ config: source, clusters: [], users: [], contexts: ['prod-admin'] }])).toThrow(/select its cluster/);
+    target.clusters = [{ name: 'prod', cluster: { server: 'https://other.example.test' } }];
+    expect(() => mergeSelectedEntities(target, [{ config: source, clusters: ['prod'], users: [], contexts: [] }])).toThrow(/different entity/);
+  });
 });
 
 describe('kubeconfig persistence', () => {
@@ -182,6 +198,15 @@ describe('kubeconfig persistence', () => {
     expect((await stat(file)).mode & 0o777).toBe(0o600);
     await expect(createConfigFile(file)).rejects.toThrow(/already exists/);
     expect(await readConfig(file)).toMatchObject({ clusters: [] });
+  });
+
+  it('duplicates a validated kubeconfig to a private, new file without overwriting', async () => {
+    const { folder } = await temporaryFile();
+    const copy = join(folder, 'copies', 'config');
+    await createConfigFileFromData(copy, fixture());
+    expect((await readConfig(copy)).users[0].user.token).toBe('very-secret-token');
+    expect((await stat(copy)).mode & 0o777).toBe(0o600);
+    await expect(createConfigFileFromData(copy, fixture())).rejects.toThrow(/already exists/);
   });
 
   it('keeps two config files independent when one is saved', async () => {

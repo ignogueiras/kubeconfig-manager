@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, copyFile, chmod, rename, realpath, stat, op
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { stringify, parseDocument } from 'yaml';
+import { isDeepStrictEqual } from 'node:util';
 
 export type EntityKind = 'clusters' | 'users' | 'contexts';
 export type KubeConfig = Record<string, any>;
@@ -38,7 +39,11 @@ export async function configExists(path: string): Promise<boolean> {
 }
 
 export async function createConfigFile(path: string): Promise<void> {
-  const config: KubeConfig = { apiVersion: 'v1', kind: 'Config', clusters: [], users: [], contexts: [], 'current-context': '' };
+  await createConfigFileFromData(path, { apiVersion: 'v1', kind: 'Config', clusters: [], users: [], contexts: [], 'current-context': '' });
+}
+
+export async function createConfigFileFromData(path: string, config: KubeConfig): Promise<void> {
+  if (!config || typeof config !== 'object' || config.kind !== 'Config') throw new ApiError(400, 'Refusing to create a non-kubeconfig document.');
   const content = stringify(config);
   const document = parseDocument(content, { uniqueKeys: true });
   if (document.errors.length) throw new ApiError(400, 'Refusing to create invalid YAML.');
@@ -56,6 +61,42 @@ export async function createConfigFile(path: string): Promise<void> {
   } finally {
     await handle.close();
   }
+}
+
+export type MergeSelection = { config: KubeConfig; clusters: string[]; users: string[]; contexts: string[] };
+
+export function mergeSelectedEntities(target: KubeConfig, selections: MergeSelection[]): KubeConfig {
+  const additions: Record<EntityKind, Map<string, any>> = {
+    clusters: new Map(),
+    users: new Map(),
+    contexts: new Map(),
+  };
+
+  for (const selection of selections) {
+    for (const kind of ['clusters', 'users', 'contexts'] as EntityKind[]) {
+      for (const name of selection[kind]) {
+        const entity = (selection.config[kind] ?? []).find((item: any) => item.name === name);
+        if (!entity) throw new ApiError(400, `Selected ${kind.slice(0, -1)} not found in source config: ${name}.`);
+        const existing = (target[kind] ?? []).find((item: any) => item.name === name) ?? additions[kind].get(name);
+        if (existing && !isDeepStrictEqual(existing, entity)) {
+          throw new ApiError(409, `Cannot merge ${kind.slice(0, -1)} "${name}": a different entity with that name already exists.`);
+        }
+        if (!existing) additions[kind].set(name, entity);
+      }
+    }
+  }
+
+  const availableClusters = new Set([...(target.clusters ?? []).map((item: any) => item.name), ...additions.clusters.keys()]);
+  const availableUsers = new Set([...(target.users ?? []).map((item: any) => item.name), ...additions.users.keys()]);
+  for (const context of additions.contexts.values()) {
+    if (!availableClusters.has(context.context?.cluster)) throw new ApiError(400, `Cannot merge context "${context.name}": select its cluster or add that cluster to the destination first.`);
+    if (!availableUsers.has(context.context?.user)) throw new ApiError(400, `Cannot merge context "${context.name}": select its user or add that user to the destination first.`);
+  }
+
+  for (const kind of ['clusters', 'users', 'contexts'] as EntityKind[]) {
+    target[kind] = [...(target[kind] ?? []), ...additions[kind].values()];
+  }
+  return target;
 }
 
 export function sanitizeConfig(config: KubeConfig) {
